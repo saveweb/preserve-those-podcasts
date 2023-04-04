@@ -111,9 +111,9 @@ def checkEpisodeAudioSize(data, possible_sizes: List[int]=[-1]):
         if possible_size > 0 and data_size > possible_size * MAX_EPISODE_AUDIO_SIZE_TOLERANCE:
             raise FeedTooLargeError('Episode audio too large')
     
-    # show progress bar
-    print(f'{data_size}/{possible_size}/{MAX_EPISODE_AUDIO_SIZE} \t {data_size/1024/1024:.2f} MiB {data_size/possible_size*100:.2f}%',
-          end='\r')
+        # show progress bar
+        print(f'{data_size}/{possible_size}/{MAX_EPISODE_AUDIO_SIZE} \t {data_size/1024/1024:.2f} MiB {data_size/possible_size*100:.2f}%',
+            end='               \r')
 
 
 
@@ -185,7 +185,7 @@ def download_episode(session: requests.Session, url, possible_size=-1, guid: str
             with open(ep_file_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=1024 * 256): # 256 KiB
                     real_size += len(chunk)
-                    checkEpisodeAudioSize(real_size, [possible_size])
+                    checkEpisodeAudioSize(real_size, [possible_size, content_length])
                     f.write(chunk)
 
             print('\nAudio duration:', audio_duration(ep_file_path))
@@ -295,7 +295,7 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
             if link.has_key('type') and 'audio' in link.type:
                 print(link.href)
                 print(link.type)
-                print(link.length, "(", int(int(link.length)/1024/1024), "MiB )")
+                print(link.get('length', -1), "(", int(int(link.get('length', -1))/1024/1024), "MiB )")
 
                 parsed_url = urlparse(link.href)
                 audio_filename = parsed_url.path.split('/')[-1]
@@ -307,7 +307,7 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
                 sha1ed_guid = sha1(entry["id"].encode('utf-8'))
                 episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
 
-                download_episode(session, link.href, possible_size=int(link.length), guid=entry["id"], episode_dir=episode_dir, filename=audio_filename)
+                download_episode(session, link.href, possible_size=int(link.get('length', -1)), guid=entry["id"], episode_dir=episode_dir, filename=audio_filename)
                 save_entry(entry, file_path=os.path.join(episode_dir, f'entry_guid_sha1_{sha1ed_guid}.json'))
                 break # avoid downloading multiple audio files
 
