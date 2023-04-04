@@ -1,3 +1,3 @@
-from preserve-podcasts.preservePodcasts import main
+from .preservePodcasts import main
 if __name__ == '__main__':
     main()
