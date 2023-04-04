@@ -38,6 +38,7 @@ DATA_DIR = 'data/'
 PODCAST_INDEX_DIR = 'podcasts_index/'
 PODCAST_AUDIO_DIR = 'podcasts_audio/'
 PODCAST_JSON_PREFIX = 'podcast_'
+PODCAST_FEED_URL_CACHE = 'feed_url_cache.json'
 __DEMO__PODCAST_JSON_FILE = DATA_DIR + PODCAST_INDEX_DIR + PODCAST_JSON_PREFIX + '114514_abcdedfdsf.json'
 __DEMO__PODCAST_AUDIO_FILE = DATA_DIR + PODCAST_AUDIO_DIR + '114514/guid_sha1_aabbcc/ep123.mp3'
 
@@ -49,14 +50,12 @@ def checkFeedSize(data: bytes):
 
 
 def sha1(data: bytes):
-    import hashlib
     sha1 = hashlib.sha1()
     sha1.update(data)
     return sha1.hexdigest()
 
 
 def sha1file(file_path: str):
-    import hashlib
     with open(file_path, 'rb') as f:
         sha1 = hashlib.sha1()
         while True:
@@ -189,7 +188,7 @@ def download_episode(session: requests.Session, url, possible_size=-1, guid: str
                     checkEpisodeAudioSize(real_size, [possible_size])
                     f.write(chunk)
 
-            print('Audio duration:', audio_duration(ep_file_path))
+            print('\nAudio duration:', audio_duration(ep_file_path))
 
             save_audio_file_metadata(content_length=content_length, etag=etag, last_modified=last_modified,
                                 audio_path=ep_file_path, metadata_path=ep_file_path + '.metadata.json',
@@ -313,7 +312,56 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
                 break # avoid downloading multiple audio files
 
 
+def feed_url_sha1(feed_url: str)-> str:
+    ''' return the sha1 of the feed url
+
+    Note: URL ends with `/` will be `rstrip('/')` before hashing
+    Note: `http://` URL will be treated as the same `https://` URL before hashing
+    '''
+    parsed_url = urlparse(feed_url)
+    if parsed_url.scheme == 'http':
+        parsed_url = parsed_url._replace(scheme='https')
+    # print(f'feed_url_sha1: {feed_url} -> {parsed_url.geturl().rstrip("/")}')
+    return sha1(parsed_url.geturl().rstrip('/').encode('utf-8'))
+
+
+def all_feed_url_sha1(use_cache: bool=False)-> set:
+    ''' return a set of all feed url sha1.  {feed_url_sha1<str>: podcast_id<int>}
+
+    Note: URL ends with `/` will be `rstrip('/')` before hashing
+    Note: `http://` URL will be treated as the same `https://` URL before hashing
+    '''
+    podcast_feed_url_cache = {}
+    if use_cache:
+        with open(os.path.join(DATA_DIR, PODCAST_INDEX_DIR, PODCAST_FEED_URL_CACHE), 'r') as f:
+            podcast_feed_url_cache = json.load(f)
+            if type(podcast_feed_url_cache) != dict:
+                podcast_feed_url_cache = {}
+            print(f'all_feed_url_sha1 cache loaded: {len(podcast_feed_url_cache)}')
+            return podcast_feed_url_cache
+
+    podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
+    for podcast_idnex_dir in podcast_index_dirs:
+        if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
+            podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
+            podcast_json_file_path = os.path.join(DATA_DIR, PODCAST_INDEX_DIR, podcast_idnex_dir)
+            with open(podcast_json_file_path, 'r') as f:
+                podcast_json = json.load(f)
+            feed_url: str = podcast_json['feed_url']
+            podcast_feed_url_cache.update({feed_url_sha1(feed_url): podcast_id})
+    with open(os.path.join(DATA_DIR, PODCAST_INDEX_DIR, PODCAST_FEED_URL_CACHE), 'w') as f:
+        # separators=(',\n', ': '))
+        json.dump(podcast_feed_url_cache, f, indent=4, sort_keys=True)
+        
+        print(f'all_feed_url_sha1 cache refreshed/loaded: {len(podcast_feed_url_cache)}')
+
+    return podcast_feed_url_cache
+
+
+
 def add_podcast(session: requests.Session, feed_url: str):
+    if feed_url_sha1(feed_url) in all_feed_url_sha1():
+        raise ValueError('Podcast already exists')
     podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
     unavailable_podcast_ids = set()
     for podcast_idnex_dir in podcast_index_dirs:
@@ -352,6 +400,7 @@ def main():
 
     podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
     podcast_ids = {}
+    all_feed_url_sha1()
     for podcast_idnex_dir in podcast_index_dirs:
         if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
             podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
@@ -368,6 +417,8 @@ def main():
 
             do_archive(this_podcast, session=session)
             save_podcast_index_json(this_podcast, podcast_json_file_path=podcast_json_file_path)
+    
+    all_feed_url_sha1()
 
 if __name__ == '__main__':
     main()
