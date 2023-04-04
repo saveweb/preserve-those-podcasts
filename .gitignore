@@ -3,3 +3,4 @@ py_venv
 data
 tmp
 debug
+dist

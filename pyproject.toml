@@ -5,7 +5,7 @@ description = "A"
 authors = ["yzqzss <yzqzss@yandex.com>"]
 license = "WTFPL"
 readme = "README.md"
-packages = [{include = "preserve-podcasts"}]
+packages = [{include = "preserve_podcasts/"}]
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -14,7 +14,7 @@ rich = "^13.3.3"
 feedparser = "^6.0.10"
 
 [tool.poetry.scripts]
-preserve-podcasts = "preserve-podcasts:main"
+preserve_podcasts = "preserve_podcasts:main"
 
 
 
