@@ -250,7 +250,9 @@ def do_archive(podcast: Podcast, session: requests.Session):
     try:
         d: feedparser.FeedParserDict = feedparser.parse(podcast['feed_url'])
         if d.get('bozo_exception', None) is not None:
-            raise d.bozo_exception 
+            print('bozo_exception:', d.bozo_exception)
+            if len(d.feed) == 0:
+                raise d.bozo_exception
         podcast.load(d.feed)
     except Exception as e:
         podcast.update_failed()
