@@ -7,7 +7,7 @@ import resource
 resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 512, 1024 * 1024 * 1024))
 # print(resource.getrlimit(resource.RLIMIT_AS))
 
-from typing import Optional
+from typing import List, Optional
 import os
 import time
 import json
@@ -95,13 +95,15 @@ def audio_duration(file_path: str):
     except:
         return -1
 
-def checkEpisodeAudioSize(data: bytes|int|None, possible_sizes: list[int]=[-1]):
+
+def checkEpisodeAudioSize(data, possible_sizes: List[int]=[-1]):
+    ''' :data: bytes or int'''
     if type(data) == int:
         data_size = data
     elif type(data) == bytes:
         data_size = len(data)
     else:
-        return None
+        raise TypeError('data must be bytes or int')
     for possible_size in possible_sizes:
         if possible_size > MAX_EPISODE_AUDIO_SIZE:
             raise FeedTooLargeError('Episode audio too large')
