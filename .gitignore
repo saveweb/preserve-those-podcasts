@@ -4,3 +4,4 @@ data
 tmp
 debug
 dist
+preserve_podcasts.lock

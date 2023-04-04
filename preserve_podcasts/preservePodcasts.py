@@ -1,3 +1,5 @@
+import fcntl
+import sys
 import requests
 
 
@@ -41,6 +43,7 @@ PODCAST_JSON_PREFIX = 'podcast_'
 PODCAST_FEED_URL_CACHE = 'feed_url_cache.json'
 __DEMO__PODCAST_JSON_FILE = DATA_DIR + PODCAST_INDEX_DIR + PODCAST_JSON_PREFIX + '114514_abcdedfdsf.json'
 __DEMO__PODCAST_AUDIO_FILE = DATA_DIR + PODCAST_AUDIO_DIR + '114514/guid_sha1_aabbcc/ep123.mp3'
+LOCK_FILE = 'preserve_podcasts.lock'
 
 def checkFeedSize(data: bytes):
     if data is None:
@@ -380,6 +383,32 @@ def add_podcast(session: requests.Session, feed_url: str):
     all_feed_url_sha1()
 
 
+class ProgramLock:
+    def __init__(self, lock_file):
+        self.lock_file = lock_file
+        self.lock_file_fd = None
+
+    def __enter__(self):
+        self.lock_file_fd = open(self.lock_file, 'w')
+        try:
+            fcntl.lockf(self.lock_file_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            print("Acquired lock, continuing.")
+        except IOError:
+            print("Another instance is already running, quitting.")
+            sys.exit(-1)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        fcntl.lockf(self.lock_file_fd, fcntl.LOCK_UN)
+        self.lock_file_fd.close()
+        print("Released lock.")
+
+    # decorator
+    def __call__(self, func):
+        def wrapper(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return wrapper
+
 
 def get_args():
     import argparse
@@ -389,7 +418,7 @@ def get_args():
 
     return parser.parse_args()
 
-
+@ProgramLock(LOCK_FILE)
 def main():
     global DEBUG_MODE
     session = createSession()
