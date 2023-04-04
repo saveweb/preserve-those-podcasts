@@ -377,6 +377,7 @@ def add_podcast(session: requests.Session, feed_url: str):
     print(f'Podcast id: {this_podcast.get("id")}')
     do_archive(this_podcast, session=session)
     save_podcast_index_json(this_podcast)
+    all_feed_url_sha1()
 
 
 
