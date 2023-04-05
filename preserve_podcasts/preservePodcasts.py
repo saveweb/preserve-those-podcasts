@@ -1,7 +1,8 @@
+import builtins
 import fcntl
 import sys
 import requests
-
+import rich
 
 import resource
 
@@ -19,7 +20,6 @@ from urllib.parse import urlparse
 
 import feedparser
 from charset_normalizer import from_bytes
-from rich import print
 
 from .podcast import Podcast
 from .pod_sessiosn import createSession
@@ -27,6 +27,13 @@ from .exception import FeedTooLargeError
 
 
 DEBUG_MODE = False
+
+# Use rich.print() instead of builtins.print()
+USE_RICH_PRINT = True
+if USE_RICH_PRINT:
+    from rich import print
+else:
+    rich.print = builtins.print
 
 # Limit Feed size to 20 MiB
 FEED_SIZE_LIMIT = 1024 * 1024 * 20 # 20 MiB
