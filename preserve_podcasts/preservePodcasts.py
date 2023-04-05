@@ -123,17 +123,17 @@ def checkEpisodeAudioSize(data, possible_sizes: List[int]=[-1]):
         data_size = len(data)
     else:
         raise TypeError('data must be bytes or int')
-    for possible_size in possible_sizes:
-        if possible_size > MAX_EPISODE_AUDIO_SIZE:
-            raise FeedTooLargeError('Episode audio too large')
-        if data_size > MAX_EPISODE_AUDIO_SIZE:
-            raise FeedTooLargeError('Episode audio too large')
-        if possible_size > 0 and data_size > possible_size * MAX_EPISODE_AUDIO_SIZE_TOLERANCE:
-            raise FeedTooLargeError('Episode audio too large')
+    possible_size = max(possible_sizes) if max(possible_sizes) > 0 else MAX_EPISODE_AUDIO_SIZE
+    if possible_size > MAX_EPISODE_AUDIO_SIZE:
+        raise FeedTooLargeError('Episode audio too large')
+    if data_size > MAX_EPISODE_AUDIO_SIZE:
+        raise FeedTooLargeError('Episode audio too large')
+    if possible_size > 0 and data_size > possible_size * MAX_EPISODE_AUDIO_SIZE_TOLERANCE:
+        raise FeedTooLargeError('Episode audio too large')
     
-        # show progress bar
-        print(f'{data_size}/{possible_size}/{MAX_EPISODE_AUDIO_SIZE} \t {data_size/1024/1024:.2f} MiB {data_size/possible_size*100:.2f}%',
-            end='               \r')
+    # show progress bar
+    print(f'{data_size}/{possible_size} \t {data_size/1024/1024:.2f} MiB {data_size/possible_size*100:.2f}%',
+        end='               \r')
 
 
 
@@ -175,6 +175,7 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
         return
 
     checkEpisodeAudioSize(0, possible_sizes) # show progress bar and check size
+    print('')
 
     session.stream = True
     with session.get(url, stream=True) as r:
@@ -208,6 +209,7 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
                     real_size += len(chunk)
                     checkEpisodeAudioSize(real_size, [possible_size, content_length])
                     f.write(chunk)
+            print('') # new line
 
             # create title mark file
             safe_title = safe_chars(title)
