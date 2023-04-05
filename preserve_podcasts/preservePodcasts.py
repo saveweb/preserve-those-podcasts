@@ -400,6 +400,8 @@ class ProgramLock:
             sys.exit(-1)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.lock_file_fd is None:
+            raise IOError("Lock file not opened.")
         fcntl.lockf(self.lock_file_fd, fcntl.LOCK_UN)
         self.lock_file_fd.close()
         print("Released lock.")
