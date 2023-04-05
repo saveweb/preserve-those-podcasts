@@ -1,5 +1,6 @@
 from inspect import signature
 from rich import print
+import sys
 
 FORCE_RAISE_EXCEPTION = False
 class runtimeTypeCheck:
@@ -12,6 +13,9 @@ class runtimeTypeCheck:
         def wrapper(*args, **kwargs):
             sig = signature(f)
             bound_args = sig.bind(*args, **kwargs)
+            if sys.version_info < (3, 10):
+                print('[white]Info: Python version < 3.10, skip type check[/white]')
+                return f(*args, **kwargs)
             for name, value in bound_args.arguments.items():
                 if name == 'self':
                     continue
