@@ -226,10 +226,9 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
 
             print('\nAudio duration:', audio_duration(ep_file_path))
 
-            save_audio_file_metadata(content_length=content_length, etag=etag, last_modified=last_modified,
-                                audio_path=ep_file_path, metadata_path=ep_file_path + '.metadata.json',
-                                suggested_filename=suggested_filename,
-                                renew=True)
+            save_audio_file_metadata(
+                audio_path=ep_file_path, metadata_path=ep_file_path + '.metadata.json', r=r,
+                renew=True)
 
         # modify file modification time
         if last_modified:
@@ -246,7 +245,8 @@ def save_entry(entry:dict, file_path:str):
         f.write(json.dumps(entry, indent=4, ensure_ascii=False))
 
 
-def save_podcast_index_json(podcast: Podcast, podcast_json_file_path: str=None):
+@runtimeTypeCheck()
+def save_podcast_index_json(podcast: Podcast, podcast_json_file_path: Optional[str]=None):
     if podcast.get('id') is None:
         raise ValueError('No id')
 
@@ -258,15 +258,38 @@ def save_podcast_index_json(podcast: Podcast, podcast_json_file_path: str=None):
         f.write(json.dumps(podcast.to_dict(), indent=4, ensure_ascii=False))
 
 def save_audio_file_metadata(
-        content_length: int, etag: str, last_modified: str, audio_path: str, metadata_path: str, suggested_filename: str = None,
+        audio_path: str, metadata_path: str, r: requests.Response,
         renew: bool = False
         ):
+    ''' renew: re calculate sha1, md5 '''
+    content_length = get_content_length(r)
 
     if not renew and os.path.exists(metadata_path):
         with open(metadata_path, 'r') as f:
             old_metadata = json.load(f)
     else:
         old_metadata = {}
+    
+    url_history = {}
+    for i, redirect in enumerate(r.history):
+
+        # del 'Set-Cookie'
+        _headers = dict(redirect.headers)
+        if 'Set-Cookie' in _headers:
+            del _headers['Set-Cookie']
+
+        url_history[int(i)] = {
+            'status_code': redirect.status_code,
+            'url': redirect.url,
+            'headers': _headers,
+        }
+
+
+    url_history[len(r.history)] = {
+        'status_code': r.status_code,
+        'url': r.url,
+        'headers': dict(r.headers),
+    }
 
     metadata = {
         'http-content-length': content_length if content_length > 0 else None,
@@ -280,6 +303,7 @@ def save_audio_file_metadata(
         'actual-duration': audio_duration(audio_path) if audio_duration(audio_path) > 0 else None,
         'sha1': sha1file(audio_path) if old_metadata.get('sha1') is None else old_metadata.get('sha1'),
         'md5': md5file(audio_path) if old_metadata.get('md5') is None else old_metadata.get('md5'),
+        'url-history': url_history,
     }
     with open(metadata_path, 'w') as f:
         f.write(json.dumps(metadata, indent=4, ensure_ascii=False))
