@@ -178,11 +178,13 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
     print('')
 
     session.stream = True
-    with session.get(url, stream=True) as r:
+    with session.get(url, stream=True, allow_redirects=True) as r:
         r.raise_for_status()
-        content_length = int(r.headers.get('content-length', -1))
-        etag = r.headers.get('etag', None)
-        last_modified = r.headers.get('last-modified', None)
+        # show redirect history
+        print('redirect history:')
+        for redirect in r.history:
+            print(redirect.status_code, '==>', redirect.url)
+        print(r.status_code, '==>', r.url)
 
         suggested_filename = r.headers.get('content-disposition', None)
         if suggested_filename is not None:
