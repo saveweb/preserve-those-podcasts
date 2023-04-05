@@ -1,6 +1,10 @@
 import dataclasses
+import feedparser
 import json
 import time
+from typing import Optional, Union
+
+from preserve_podcasts.utils.type_check import runtimeTypeCheck
 
 
 @dataclasses.dataclass
@@ -53,7 +57,9 @@ class Podcast:
     def get(self, key, default=None):
         return self._Dic.get(key, default)
 
-    def create(self, init_id: int, init_feed_url: str, init_dic: dict = None):
+
+    @runtimeTypeCheck()
+    def create(self, init_id: int, init_feed_url: str, init_dic: Optional[dict] = None):
         if init_dic is not None:
             self.load(init_dic)
         self._Dic['saveweb']['created_timestamp'] = int(time.time())
@@ -62,13 +68,17 @@ class Podcast:
         if self._Dic['feed_url'] is None:
             self._Dic['feed_url'] = init_feed_url
 
-    def load(self, dic):
-        if type(dic) == str:
-            dic = json.loads(open(dic, 'r', encoding='utf-8').read())
+
+    @runtimeTypeCheck(raise_exception=True)
+    def load(self, dic_or_dicFilePath: Union[dict, str]):
+        if type(dic_or_dicFilePath) == str:
+            dic = json.loads(open(dic_or_dicFilePath, 'r', encoding='utf-8').read())
+        else:
+            dic = dic_or_dicFilePath
 
         for key in dic:
             if key in self._Dic:
-                self._Dic[key] = dic[key]
+                self._Dic[key] = dic[key] # type: ignore @runtimeTypeCheck
 
     def update_failed(self):
         self._Dic['saveweb']['last_checked_timestamp'] = int(time.time())
@@ -88,6 +98,6 @@ class Podcast:
     def to_json(self):
         return json.dumps(self._Dic, indent=4, ensure_ascii=False)
     
-    def to_json_file(self, file_path):
+    def to_json_file(self, file_path: str):
         with open(file_path, 'w') as f:
             f.write(self.to_json())
