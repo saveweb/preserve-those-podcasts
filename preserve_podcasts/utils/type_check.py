@@ -1,17 +1,20 @@
 from inspect import signature
 from rich import print
 
-
+FORCE_RAISE_EXCEPTION = False
 class runtimeTypeCheck:
     """ Decorator to check types at runtime. """
+
     def __init__(self, raise_exception=True):
-        self.raise_exception = raise_exception
+        self.raise_exception = raise_exception or FORCE_RAISE_EXCEPTION
 
     def __call__(self, f):
         def wrapper(*args, **kwargs):
             sig = signature(f)
             bound_args = sig.bind(*args, **kwargs)
             for name, value in bound_args.arguments.items():
+                if name == 'self':
+                    continue
                 if name in sig.parameters:
                     if not isinstance(value, sig.parameters[name].annotation):
                         if self.raise_exception:
