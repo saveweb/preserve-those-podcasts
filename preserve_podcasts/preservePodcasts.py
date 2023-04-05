@@ -6,6 +6,10 @@ import rich
 
 import resource
 
+from preserve_podcasts.utils.response import get_content_disposition, get_content_length, get_content_type, get_etag, get_last_modified, float_last_modified, get_suggested_filename
+from preserve_podcasts.utils.type_check import runtimeTypeCheck
+from preserve_podcasts.utils.util import safe_chars
+
 # Limit memory usage
 resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 512, 1024 * 1024 * 1024))
 # print(resource.getrlimit(resource.RLIMIT_AS))
@@ -51,6 +55,10 @@ PODCAST_FEED_URL_CACHE = 'feed_url_cache.json'
 __DEMO__PODCAST_JSON_FILE = DATA_DIR + PODCAST_INDEX_DIR + PODCAST_JSON_PREFIX + '114514_abcdedfdsf.json'
 __DEMO__PODCAST_AUDIO_FILE = DATA_DIR + PODCAST_AUDIO_DIR + '114514/guid_sha1_aabbcc/ep123.mp3'
 LOCK_FILE = 'preserve_podcasts.lock'
+
+ # title mark
+TITLE_MARK_PREFIX = '=TITLE=='
+TITLE_MARK_SUFFIX = '.mark'
 
 def checkFeedSize(data: bytes):
     if data is None:
@@ -148,8 +156,9 @@ def get_feed(session, url) -> Optional[bytes]:
 
 
 
-def download_episode(session: requests.Session, url, possible_size=-1, guid: str = None, episode_dir: str = None,
-                     filename: str = None, force_redownload: bool = False):
+def download_episode(session: requests.Session, url, guid: str, episode_dir: str, filename: str,
+                    possible_size=-1, title: str= '',
+                    force_redownload: bool = False):
     to_download = True
     possible_sizes = [possible_size] if possible_size > 0 else []
 
@@ -197,6 +206,16 @@ def download_episode(session: requests.Session, url, possible_size=-1, guid: str
                     real_size += len(chunk)
                     checkEpisodeAudioSize(real_size, [possible_size, content_length])
                     f.write(chunk)
+
+            # create title mark file
+            safe_title = safe_chars(title)
+            if safe_title and not os.path.exists(os.path.join(episode_dir, TITLE_MARK_PREFIX+safe_title+TITLE_MARK_SUFFIX)):
+                with open(os.path.join(episode_dir, TITLE_MARK_PREFIX+safe_title+TITLE_MARK_SUFFIX),
+                          'w', encoding='utf-8') as f:
+                    if type(title) == str and title:
+                        f.write(title)
+                    else:
+                        f.write('')
 
             print('\nAudio duration:', audio_duration(ep_file_path))
 
@@ -290,7 +309,10 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
 
         print("\n=====================================")
         print(f'Title: "{entry.get("title")}"')
-        safe_title = entry.get('title', '').translate({ord(c): None for c in ntfs_chars})[:40]
+
+        title: str = entry.get('title', '') # type: ignore
+        safe_title = safe_chars(title) 
+
         print(f'Safe Title: "{safe_title}"')
         print(f'Link: {entry.get("link")}')
         print(f'GUID: {entry["id"]}') # guid must exist
@@ -319,7 +341,11 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
                 sha1ed_guid = sha1(entry["id"].encode('utf-8'))
                 episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
 
-                download_episode(session, link.href, possible_size=int(link.get('length', -1)), guid=entry["id"], episode_dir=episode_dir, filename=audio_filename)
+                download_episode(session, link.href, possible_size=int(link.get('length', -1)), guid=guid, # type: ignore
+                                 episode_dir=episode_dir,
+                                 filename=url2audio_filename(link.href), # type: ignore @runtimeTypeCheck
+                                 title=title,
+                )
                 save_entry(entry, file_path=os.path.join(episode_dir, f'entry_guid_sha1_{sha1ed_guid}.json'))
                 break # avoid downloading multiple audio files
 
