@@ -301,6 +301,17 @@ def do_archive(podcast: Podcast, session: requests.Session):
     podcast.update_success()
 
 
+@runtimeTypeCheck()
+def url2audio_filename(url: str) -> str:
+    parsed_url = urlparse(url)
+    audio_filename = parsed_url.path.split('/')[-1]
+    if '.' not in audio_filename:
+        audio_filename += '.mp3'
+    if audio_filename == '.mp3':
+        audio_filename = 'episode.mp3'
+
+    return audio_filename
+
 def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, podcast_audio_dir: str):
     ntfs_chars = r'<>:"/\|?*'
     for entry in d.entries:
