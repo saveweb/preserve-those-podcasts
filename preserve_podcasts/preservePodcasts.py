@@ -137,11 +137,11 @@ def checkEpisodeAudioSize(data, possible_sizes: List[int]=[-1]):
 
 
 
-def get_feed(session, url) -> Optional[bytes]:
+def get_feed(session: requests.Session, url: str) -> Optional[bytes]:
     session.stream = True
     with session.get(url, stream=True) as r:
         r.raise_for_status()
-        data_raw: bytes = None
+        data_raw: Optional[bytes] = None
         encoding = r.encoding
         for chunk in r.iter_content(chunk_size=1024):
             checkFeedSize(chunk)
@@ -149,7 +149,11 @@ def get_feed(session, url) -> Optional[bytes]:
                 data_raw = chunk
             else:
                 data_raw += chunk
-        apparent_encoding = from_bytes(data_raw).best().encoding
+        if type(data_raw) != bytes:
+            return None
+        apparent_encoding = from_bytes(data_raw).best()
+        if apparent_encoding is not None:
+            apparent_encoding = apparent_encoding.encoding
     print(encoding, apparent_encoding)
 
     return data_raw
@@ -169,6 +173,7 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
         with open(ep_file_path+'.metadata.json', 'r') as f:
             metadata = json.load(f)
             possible_sizes.append(metadata['http-content-length']) if 'http-content-length' in metadata else None
+
     if os.path.exists(ep_file_path) and os.path.getsize(ep_file_path) in possible_sizes:
         print('File already exists')
         to_download = False
@@ -185,24 +190,20 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
         for redirect in r.history:
             print(redirect.status_code, '==>', redirect.url)
         print(r.status_code, '==>', r.url)
+        content_length = get_content_length(r)
+        etag = get_etag(r)
+        last_modified = get_last_modified(r)
 
-        suggested_filename = r.headers.get('content-disposition', None)
-        if suggested_filename is not None:
-            suggested_filename = suggested_filename.split('filename=')[-1]
-            if suggested_filename.startswith('"') and suggested_filename.endswith('"'):
-                suggested_filename = suggested_filename[1:-1]
-            if suggested_filename.startswith("'") and suggested_filename.endswith("'"):
-                suggested_filename = suggested_filename[1:-1]
-            if suggested_filename:
-                pass
+        content_disposition = get_content_disposition(r)
+        suggested_filename = get_suggested_filename(r)
 
-        print(f'content-length: {content_length}, etag: {etag}, last-modified: {last_modified}, suggested_filename: {suggested_filename}')
+        print(f'content-length: {content_length}, etag: [green]{etag}[/green], last-modified: [yellow]{last_modified}[/yellow], suggested_filename: [blue]{suggested_filename}[/blue]')
         if content_length > 0 and content_length != possible_size:
             if os.path.exists(ep_file_path) and os.path.getsize(ep_file_path) == content_length:
                 print('File already exists')
                 possible_sizes.append(content_length) if content_length > 0 and content_length not in possible_sizes else None
                 to_download = False
-           
+
         real_size = 0
         if to_download or force_redownload:
             os.makedirs(os.path.dirname(ep_file_path), exist_ok=True)
@@ -230,11 +231,15 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
                                 suggested_filename=suggested_filename,
                                 renew=True)
 
-        # modify file update time
+        # modify file modification time
         if last_modified:
-            atime = os.path.getatime(ep_file_path)
-            mtime = time.mktime(time.strptime(last_modified, '%a, %d %b %Y %H:%M:%S %Z'))
-            os.utime(ep_file_path, (atime, mtime))
+            atime = os.path.getatime(ep_file_path) # keep access time
+            mtime = float_last_modified(last_modified)
+            if mtime:
+                os.utime(ep_file_path, (atime, mtime)) # modify file update time
+            else:
+                print('mtime error:', mtime)
+
 
 def save_entry(entry:dict, file_path:str):
     with open(file_path, 'w') as f:
@@ -265,9 +270,12 @@ def save_audio_file_metadata(
 
     metadata = {
         'http-content-length': content_length if content_length > 0 else None,
-        'http-etag': etag,
-        'http-last-modified': last_modified,
-        'http-suggested-filename': suggested_filename , # http header 'content-disposition'
+        'http-etag': get_etag(r),
+        'http-last-modified': get_last_modified(r),
+        'http-last-modified-float': float_last_modified(get_last_modified(r)),
+        'http-content-type': get_content_type(r),
+        'http-content-disposition-raw': get_content_disposition(r), # http header 'content-disposition
+        'http-content-disposition-filename': get_suggested_filename(r) , # http header 'content-disposition'
         'actual-size': os.path.getsize(audio_path) if os.path.exists(audio_path) else None,
         'actual-duration': audio_duration(audio_path) if audio_duration(audio_path) > 0 else None,
         'sha1': sha1file(audio_path) if old_metadata.get('sha1') is None else old_metadata.get('sha1'),
@@ -284,8 +292,8 @@ def do_archive(podcast: Podcast, session: requests.Session):
         if d.get('bozo_exception', None) is not None:
             print('bozo_exception:', d.bozo_exception)
             if len(d.feed) == 0:
-                raise d.bozo_exception
-        podcast.load(d.feed)
+                raise d.bozo_exception # type: ignore
+        podcast.load(d.feed) # type: ignore @runtimeTypeCheck
     except Exception as e:
         podcast.update_failed()
         raise e
@@ -312,8 +320,8 @@ def url2audio_filename(url: str) -> str:
 
     return audio_filename
 
+
 def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, podcast_audio_dir: str):
-    ntfs_chars = r'<>:"/\|?*'
     for entry in d.entries:
         is_episode = False
         for link in entry.get('links', []):
@@ -332,30 +340,32 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
 
         print(f'Safe Title: "{safe_title}"')
         print(f'Link: {entry.get("link")}')
-        print(f'GUID: {entry["id"]}') # guid must exist
-        print(f'Published: {entry.get("published")}')
-        print(f'Updated: {entry.get("updated")}')
-        print(f'itunes_duration: {entry.get("itunes_duration")}')
-        # itunes_title = entry.get('itunes_title')
+        guid = entry.get('id')
+        print(f'GUID: {guid}')
+        if guid is None:
+            raise ValueError('GUID must exist')
+        if type(guid) is not str or guid == '':
+            raise ValueError('GUID must be str and not empty')
+        print(f'Published: {entry.get("published")}', '\t' ,f'Updated: {entry.get("updated")}')
+
+        itunes_title = entry.get('itunes_title')
+        itunes_duration = entry.get('itunes_duration')
         itunes_season = entry.get('itunes_season')
         itunes_episode = entry.get('itunes_episode')
-        print(f'itunes_season: {itunes_season}, itunes_episode: {itunes_episode}')
+        print(f'itunes_title: [yellow]{itunes_title}[/yellow]')
+        print(f'itunes_duration: {itunes_duration}', '\t' ,
+              f'itunes_season: {itunes_season}', '\t' ,
+              f'itunes_episode: {itunes_episode}')
         itunes_explicit = entry.get('itunes_explicit') # NSFW
         
         for link in entry.links:
             if link.has_key('type') and 'audio' in link.type:
                 print(link.href)
                 print(link.type)
-                print(link.get('length', -1), "(", int(int(link.get('length', -1))/1024/1024), "MiB )")
+                print(link.get('length', -1), "(",
+                      int(int(link.get('length', -1))/1024/1024), "MiB )") # type: ignore
 
-                parsed_url = urlparse(link.href)
-                audio_filename = parsed_url.path.split('/')[-1]
-                if '.' not in audio_filename:
-                    audio_filename += '.mp3'
-                if audio_filename == '.mp3':
-                    audio_filename = 'episode.mp3'
-
-                sha1ed_guid = sha1(entry["id"].encode('utf-8'))
+                sha1ed_guid = sha1(guid.encode('utf-8'))
                 episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
 
                 download_episode(session, link.href, possible_size=int(link.get('length', -1)), guid=guid, # type: ignore
@@ -380,7 +390,7 @@ def feed_url_sha1(feed_url: str)-> str:
     return sha1(parsed_url.geturl().rstrip('/').encode('utf-8'))
 
 
-def all_feed_url_sha1(use_cache: bool=False)-> set:
+def all_feed_url_sha1(use_cache: bool=False)-> dict:
     ''' return a set of all feed url sha1.  {feed_url_sha1<str>: podcast_id<int>}
 
     Note: URL ends with `/` will be `rstrip('/')` before hashing
