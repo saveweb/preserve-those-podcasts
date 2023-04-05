@@ -435,20 +435,26 @@ def main():
     all_feed_url_sha1()
     for podcast_idnex_dir in podcast_index_dirs:
         if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
+            # try:
             podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
+            # except ValueError:
+            #     raise ValueError(f'Cant parse podcast id from {podcast_idnex_dir}')
+
             podcast_ids[podcast_id] = podcast_idnex_dir
 
-        if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX + str(podcast_id) + '_'):
-            podcast_json_file_path = os.path.join(DATA_DIR, PODCAST_INDEX_DIR, podcast_idnex_dir)
-            this_podcast = Podcast()
-            this_podcast.load(podcast_json_file_path)
-            if podcast_id != this_podcast['id']:
-                raise ValueError('Podcast id not match')
-            if this_podcast['id'] is None:
-                raise ValueError('Podcast id not set')
+    for podcast_id in podcast_ids:
+        podcast_idnex_dir = podcast_ids[podcast_id]
 
-            do_archive(this_podcast, session=session)
-            save_podcast_index_json(this_podcast, podcast_json_file_path=podcast_json_file_path)
+        podcast_json_file_path = os.path.join(DATA_DIR, PODCAST_INDEX_DIR, podcast_idnex_dir)
+        this_podcast = Podcast()
+        this_podcast.load(podcast_json_file_path)
+        if podcast_id != this_podcast['id']:
+            raise ValueError('Podcast id not match')
+        if this_podcast['id'] is None:
+            raise ValueError('Podcast id not set')
+
+        do_archive(this_podcast, session=session)
+        save_podcast_index_json(this_podcast, podcast_json_file_path=podcast_json_file_path)
     
     all_feed_url_sha1()
 
