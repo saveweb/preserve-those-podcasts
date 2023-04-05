@@ -1,4 +1,4 @@
-from inspect import signature
+import inspect
 from rich import print
 import sys
 
@@ -11,7 +11,7 @@ class runtimeTypeCheck:
 
     def __call__(self, f):
         def wrapper(*args, **kwargs):
-            sig = signature(f)
+            sig = inspect.signature(f)
             bound_args = sig.bind(*args, **kwargs)
             if sys.version_info < (3, 10):
                 print('[white]Info: Python version < 3.10, skip type check[/white]')
@@ -21,6 +21,9 @@ class runtimeTypeCheck:
                     continue
                 if name in sig.parameters:
                     if not isinstance(value, sig.parameters[name].annotation):
+                        if sig.parameters[name].annotation is inspect._empty:
+                            print(f'[white]Info: Argument {name} has no type annotation, skip type check[/white]')
+                            continue
                         if self.raise_exception:
                             raise TypeError(f'Argument {name} must be of type {sig.parameters[name].annotation}')
                         else:
