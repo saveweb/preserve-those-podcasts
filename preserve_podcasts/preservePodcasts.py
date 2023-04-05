@@ -161,12 +161,12 @@ def get_feed(session: requests.Session, url: str) -> Optional[bytes]:
 
 
 
-
-def download_episode(session: requests.Session, url, guid: str, episode_dir: str, filename: str,
-                    possible_size=-1, title: str= '',
+@runtimeTypeCheck()
+def download_episode(session: requests.Session, url: str, guid: str, episode_dir: str, filename: str,
+                    possible_size: int=-1, title: str= '',
                     force_redownload: bool = False):
     to_download = True
-    possible_sizes = [possible_size] if possible_size > 0 else []
+    possible_sizes = [possible_size]
 
     ep_file_path = os.path.join(episode_dir, filename)
     if os.path.exists(ep_file_path+'.metadata.json'):
