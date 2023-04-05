@@ -60,6 +60,8 @@ LOCK_FILE = 'preserve_podcasts.lock'
 TITLE_MARK_PREFIX = '=TITLE=='
 TITLE_MARK_SUFFIX = '.mark'
 
+EPISODE_DOWNLOAD_CHUNK_SIZE = 1024 * 337 # bytes
+
 def checkFeedSize(data: bytes):
     if data is None:
         return
@@ -202,7 +204,7 @@ def download_episode(session: requests.Session, url, guid: str, episode_dir: str
         if to_download or force_redownload:
             os.makedirs(os.path.dirname(ep_file_path), exist_ok=True)
             with open(ep_file_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024 * 256): # 256 KiB
+                for chunk in r.iter_content(chunk_size=EPISODE_DOWNLOAD_CHUNK_SIZE):
                     real_size += len(chunk)
                     checkEpisodeAudioSize(real_size, [possible_size, content_length])
                     f.write(chunk)
