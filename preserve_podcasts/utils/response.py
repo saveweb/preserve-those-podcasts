@@ -2,6 +2,7 @@ from typing import Optional, Union
 import time
 
 import requests
+import pyrfc6266
 from rich import print
 
 from preserve_podcasts.utils.type_check import runtimeTypeCheck
@@ -80,20 +81,10 @@ def get_suggested_filename(r_or_string: Union[Optional[requests.Response], Optio
     
     if isinstance(r_or_string, requests.Response):
         content_disposition = get_content_disposition(r_or_string)
+        suggested_filename: Optional[str] = pyrfc6266.parse_filename(content_disposition) if content_disposition else None
+    elif isinstance(r_or_string, str):
+        suggested_filename: Optional[str] = pyrfc6266.parse_filename(r_or_string)
     else:
-        content_disposition = r_or_string
-    
-    if content_disposition is None:
-        return None
-    
-    if 'filename=' not in content_disposition:
-        print('[red]Warning: [/red]`content-disposition` header does not contain `filename=`.')
-        # return None
-    
-    suggested_filename = content_disposition.split('filename=')[-1]
-    if suggested_filename.startswith('"') and suggested_filename.endswith('"'):
-        suggested_filename = suggested_filename[1:-1]
-    elif suggested_filename.startswith("'") and suggested_filename.endswith("'"):
-        suggested_filename = suggested_filename[1:-1]
+        raise TypeError(f"Expected requests.Response or str, got {type(r_or_string)}")
 
-    return content_disposition.split('filename=')[1]
+    return suggested_filename
