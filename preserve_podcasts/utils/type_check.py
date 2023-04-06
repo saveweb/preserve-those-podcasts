@@ -3,6 +3,7 @@ from rich import print
 import sys
 
 FORCE_RAISE_EXCEPTION = False
+
 class runtimeTypeCheck:
     """ Decorator to check types at runtime. """
 
@@ -14,7 +15,7 @@ class runtimeTypeCheck:
             sig = inspect.signature(f)
             bound_args = sig.bind(*args, **kwargs)
             if sys.version_info < (3, 10):
-                print('[white]Info: Python version < 3.10, skip type check[/white]')
+                # print('[white]Info: Python version < 3.10, skip type check[/white]')
                 return f(*args, **kwargs)
             for name, value in bound_args.arguments.items():
                 if name == 'self':

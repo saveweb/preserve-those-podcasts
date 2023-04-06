@@ -450,7 +450,7 @@ def all_feed_url_sha1(use_cache: bool=False)-> dict:
 
 def add_podcast(session: requests.Session, feed_url: str):
     if feed_url_sha1(feed_url) in all_feed_url_sha1():
-        raise ValueError('Podcast already exists')
+        raise ValueError(f'Podcast already exists (sha1: "{feed_url_sha1(feed_url)}")\n')
     podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
     unavailable_podcast_ids = set()
     for podcast_idnex_dir in podcast_index_dirs:
@@ -501,19 +501,30 @@ class ProgramLock:
 def get_args():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--add', type=str, default=None)
+    # parser.add_argument('--debug', action='store_true')
+    parser.add_argument('-a','--add', nargs='+', help='RSS feed URL(s)', default=[])
+    parser.add_argument('-u','--update', action='store_true', help='Update podcast')
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.update and args.add:
+        parser.error('--update can not be used with RSS feed URL(s)')
+    
+    return args
 
 @ProgramLock(LOCK_FILE)
 def main():
-    global DEBUG_MODE
     session = createSession()
     args = get_args()
-    DEBUG_MODE = args.debug
-    if args.add:
-        add_podcast(session=session, feed_url=args.add)
+    for feed_url in args.add:
+        try:
+            add_podcast(session, feed_url)
+        except ValueError as e:
+            if str(e).startswith('Podcast already exists'):
+                print(str(e))
+            else:
+                raise e
+
+    if not args.update:
         return
 
     podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
