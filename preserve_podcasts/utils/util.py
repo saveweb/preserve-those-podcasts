@@ -1,3 +1,4 @@
+import hashlib
 from preserve_podcasts.utils.type_check import runtimeTypeCheck
 
 
@@ -35,3 +36,8 @@ def safe_chars(s: str, replace_space: bool=True, max_bytes: int=240, replace_las
         string = string[:-1] + '_'
 
     return string
+
+def sha1(data: bytes):
+    sha1 = hashlib.sha1()
+    sha1.update(data)
+    return sha1.hexdigest()

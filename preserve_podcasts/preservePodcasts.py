@@ -1,14 +1,15 @@
 import builtins
-import fcntl
-import sys
+import shutil
 import requests
 import rich
 
 import resource
+from preserve_podcasts.utils.file import audio_duration, md5file, sha1file
+from preserve_podcasts.utils.program_lock import ProgramLock
 
 from preserve_podcasts.utils.response import get_content_disposition, get_content_length, get_content_type, get_etag, get_last_modified, float_last_modified, get_suggested_filename
 from preserve_podcasts.utils.type_check import runtimeTypeCheck
-from preserve_podcasts.utils.util import safe_chars
+from preserve_podcasts.utils.util import safe_chars, sha1
 
 # Limit memory usage
 resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 512, 1024 * 1024 * 1024))
@@ -18,8 +19,6 @@ from typing import List, Optional
 import os
 import time
 import json
-import hashlib
-import subprocess
 from urllib.parse import urlparse
 
 import feedparser
@@ -70,52 +69,6 @@ def checkFeedSize(data: bytes):
         return
     if len(data) > FEED_SIZE_LIMIT:
         raise FeedTooLargeError('Feed too large')
-
-
-def sha1(data: bytes):
-    sha1 = hashlib.sha1()
-    sha1.update(data)
-    return sha1.hexdigest()
-
-
-def sha1file(file_path: str):
-    with open(file_path, 'rb') as f:
-        sha1 = hashlib.sha1()
-        while True:
-            data = f.read(1024)
-            if not data:
-                break
-            sha1.update(data)
-    return sha1.hexdigest()
-
-def md5file(file_path: str):
-    with open(file_path, 'rb') as f:
-        md5 = hashlib.md5()
-        while True:
-            data = f.read(1024)
-            if not data:
-                break
-            md5.update(data)
-    return md5.hexdigest()
-
-def is_playable(file_path: str):
-    if audio_duration(file_path) > 0:
-        return True
-    
-    return False
-    
-    
-def audio_duration(file_path: str):
-    ''' Return audio duration in seconds, -1 if failed'''
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f'File not found: {file_path}')
-
-    try:
-        t = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file_path], stderr=subprocess.STDOUT)
-        duration = int(t.decode('utf-8').strip("\n").split('.')[0])
-        return duration
-    except:
-        return -1
 
 
 def checkEpisodeAudioSize(data, possible_sizes: List[int]=[-1]):
@@ -310,10 +263,9 @@ def save_audio_file_metadata(
     }
     with open(metadata_path, 'w') as f:
         f.write(json.dumps(metadata, indent=4, ensure_ascii=False))
-    
 
 
-def do_archive(podcast: Podcast, session: requests.Session):
+def do_archive(podcast: Podcast, session: requests.Session, delete_episodes_not_in_feed: bool = False):
     try:
         d: feedparser.FeedParserDict = feedparser.parse(podcast['feed_url'])
         if d.get('bozo_exception', None) is not None:
@@ -332,7 +284,8 @@ def do_archive(podcast: Podcast, session: requests.Session):
 
     podcast_audio_dir = os.path.join(DATA_DIR, PODCAST_AUDIO_DIR, str(podcast['id']))
 
-    archive_entries(d=d, session=session, podcast_audio_dir=podcast_audio_dir)
+    archive_entries(d=d, session=session, podcast_audio_dir=podcast_audio_dir,
+                    delete_episodes_not_in_feed=delete_episodes_not_in_feed)
     podcast.update_success()
 
 
@@ -348,7 +301,10 @@ def url2audio_filename(url: str) -> str:
     return audio_filename
 
 
-def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, podcast_audio_dir: str):
+def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, podcast_audio_dir: str,
+                    delete_episodes_not_in_feed: bool = False):
+    sha1ed_guids = set()
+
     for entry in d.entries:
         is_episode = False
         for link in entry.get('links', []):
@@ -409,6 +365,7 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
                     int(length/1024/1024), "MiB )") # type: ignore
 
             sha1ed_guid = sha1(guid.encode('utf-8'))
+            sha1ed_guids.add(sha1ed_guid)
             episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
 
             download_episode(session, link.href, possible_size=length, guid=guid, # type: ignore
@@ -419,6 +376,13 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
             save_entry(entry, file_path=os.path.join(episode_dir, f'entry_guid_sha1_{sha1ed_guid}.json'))
             break # avoid downloading multiple audio files
 
+    if delete_episodes_not_in_feed:
+        # delete episodes not in feed
+        local_episode_dirs = set(os.listdir(podcast_audio_dir))
+        episodes_not_in_feed_dirs = local_episode_dirs ^ sha1ed_guids
+        for dir in episodes_not_in_feed_dirs:
+            print(f'[red]Episode not in feed, deleting {dir}[/red]')
+            shutil.rmtree(os.path.join(podcast_audio_dir, dir))
 
 def feed_url_sha1(feed_url: str)-> str:
     ''' return the sha1 of the feed url
@@ -473,10 +437,15 @@ def add_podcast(session: requests.Session, feed_url: str):
         raise ValueError(f'Podcast already exists (sha1: "{feed_url_sha1(feed_url)}")\n')
     podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
     unavailable_podcast_ids = set()
+
+    # get used podcast ids
     for podcast_idnex_dir in podcast_index_dirs:
         if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
             podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
+            # "podcast_123_whatever.json" -> 123
             unavailable_podcast_ids.add(podcast_id)
+    
+    # find an available podcast id
     available_podcast_id = 1
     while available_podcast_id in unavailable_podcast_ids:
         available_podcast_id += 1
@@ -484,38 +453,9 @@ def add_podcast(session: requests.Session, feed_url: str):
     this_podcast = Podcast()
     this_podcast.create(init_id=available_podcast_id, init_feed_url=feed_url)
     print(f'Podcast id: {this_podcast.get("id")}')
-    do_archive(this_podcast, session=session)
+    do_archive(this_podcast, session=session, delete_episodes_not_in_feed=True)
     save_podcast_index_json(this_podcast)
     all_feed_url_sha1()
-
-
-class ProgramLock:
-    def __init__(self, lock_file):
-        self.lock_file = lock_file
-        self.lock_file_fd = None
-
-    def __enter__(self):
-        self.lock_file_fd = open(self.lock_file, 'w')
-        try:
-            fcntl.lockf(self.lock_file_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            print("Acquired lock, continuing.")
-        except IOError:
-            print("Another instance is already running, quitting.")
-            sys.exit(-1)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.lock_file_fd is None:
-            raise IOError("Lock file not opened.")
-        fcntl.lockf(self.lock_file_fd, fcntl.LOCK_UN)
-        self.lock_file_fd.close()
-        print("Released lock.")
-
-    # decorator
-    def __call__(self, func):
-        def wrapper(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return wrapper
 
 
 def get_args():
