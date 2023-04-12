@@ -62,6 +62,9 @@ TITLE_MARK_SUFFIX = '.mark'
 
 EPISODE_DOWNLOAD_CHUNK_SIZE = 1024 * 337 # bytes
 
+REFRESH_INTERVAL = 60 * 60 * 24 # 24 hours
+
+
 def checkFeedSize(data: bytes):
     if data is None:
         return
@@ -383,22 +386,38 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
         itunes_explicit = entry.get('itunes_explicit') # NSFW
         
         for link in entry.links:
-            if link.has_key('type') and 'audio' in link.type:
-                print(link.href)
-                print(link.type)
-                print(link.get('length', -1), "(",
-                      int(int(link.get('length', -1))/1024/1024), "MiB )") # type: ignore
+            # The enclosure must have three attributes: url, length, and type.
+            if not link.has_key('href') or not link.has_key('length') or not link.has_key('type'):
+                continue
+            if 'audio' not in link.type: # only download audio
+                continue
 
-                sha1ed_guid = sha1(guid.encode('utf-8'))
-                episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
+            print(link.href)
+            print(link.type)
 
-                download_episode(session, link.href, possible_size=int(link.get('length', -1)), guid=guid, # type: ignore
-                                 episode_dir=episode_dir,
-                                 filename=url2audio_filename(link.href), # type: ignore @runtimeTypeCheck
-                                 title=title,
-                )
-                save_entry(entry, file_path=os.path.join(episode_dir, f'entry_guid_sha1_{sha1ed_guid}.json'))
-                break # avoid downloading multiple audio files
+            # According to the best practice <https://www.rssboard.org/rss-profile#element-channel-item-enclosure>,
+            # When an enclosure's size cannot be determined, a publisher should use a length of 0.
+            # But in realworld, some podcast feed use "None" or "unknown" to represent the length is unknown.
+            length = link.get('length', -1) # use -1 as unknown length (magic number)
+            try:
+                length = int(length) # type: ignore
+                if length <= 0:
+                    length = -1
+            except ValueError:
+                length = -1
+            print(length, "(",
+                    int(length/1024/1024), "MiB )") # type: ignore
+
+            sha1ed_guid = sha1(guid.encode('utf-8'))
+            episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
+
+            download_episode(session, link.href, possible_size=length, guid=guid, # type: ignore
+                                episode_dir=episode_dir,
+                                filename=url2audio_filename(link.href), # type: ignore @runtimeTypeCheck
+                                title=title,
+            )
+            save_entry(entry, file_path=os.path.join(episode_dir, f'entry_guid_sha1_{sha1ed_guid}.json'))
+            break # avoid downloading multiple audio files
 
 
 def feed_url_sha1(feed_url: str)-> str:
@@ -449,6 +468,7 @@ def all_feed_url_sha1(use_cache: bool=False)-> dict:
 
 
 def add_podcast(session: requests.Session, feed_url: str):
+    print(f'Adding podcast: {feed_url}')
     if feed_url_sha1(feed_url) in all_feed_url_sha1():
         raise ValueError(f'Podcast already exists (sha1: "{feed_url_sha1(feed_url)}")\n')
     podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
@@ -504,6 +524,7 @@ def get_args():
     # parser.add_argument('--debug', action='store_true')
     parser.add_argument('-a','--add', nargs='+', help='RSS feed URL(s)', default=[])
     parser.add_argument('-u','--update', action='store_true', help='Update podcast')
+    parser.add_argument('--only', nargs='+', help='Only update these podcast ids', default=[])
 
     args = parser.parse_args()
     if args.update and args.add:
@@ -515,6 +536,8 @@ def get_args():
 def main():
     session = createSession()
     args = get_args()
+    print(args.add)
+    time.sleep(1)
     for feed_url in args.add:
         try:
             add_podcast(session, feed_url)
@@ -539,6 +562,11 @@ def main():
 
             podcast_ids[podcast_id] = podcast_idnex_dir
 
+
+    if args.only:
+        podcast_ids = {int(podcast_id): podcast_ids[int(podcast_id)] for podcast_id in args.only}
+        print(f'Only update podcast ids: {args.only}')
+
     for podcast_id in podcast_ids:
         podcast_idnex_dir = podcast_ids[podcast_id]
 
@@ -549,7 +577,14 @@ def main():
             raise ValueError('Podcast id not match')
         if this_podcast['id'] is None:
             raise ValueError('Podcast id not set')
-
+        if (time.time() - this_podcast['saveweb']['last_success_timestamp']) < REFRESH_INTERVAL:
+            print(f'Podcast {this_podcast["id"]}: {this_podcast["title"]} not need to update')
+            continue
+        if this_podcast["enabled"] is False:
+            print(f'Podcast {this_podcast["id"]}: {this_podcast["title"]} is disabled')
+            continue
+        
+        print(f'Podcast {this_podcast["id"]}: {this_podcast["title"]} updating...')
         do_archive(this_podcast, session=session)
         save_podcast_index_json(this_podcast, podcast_json_file_path=podcast_json_file_path)
     
