@@ -6,6 +6,8 @@ authors = ["yzqzss <yzqzss@yandex.com>"]
 license = "WTFPL"
 readme = "README.md"
 packages = [{include = "preserve_podcasts/"}]
+
+[tool.poetry.urls]
 respository = "https://github.com/saveweb/preserve-those-podcasts"
 
 [tool.poetry.dependencies]
