@@ -8,7 +8,7 @@ class ProgramLock:
         self.lock_file_fd = None
 
     def __enter__(self):
-        self.lock_file_fd = open(self.lock_file, 'w')
+        self.lock_file_fd = open(self.lock_file, 'w', encoding='utf-8')
         try:
             fcntl.lockf(self.lock_file_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             print("Acquired lock, continuing.")

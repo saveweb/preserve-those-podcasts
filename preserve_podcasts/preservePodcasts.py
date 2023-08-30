@@ -1,21 +1,21 @@
 import builtins
+from pathlib import Path
+import logging
 import shutil
-import requests
-import rich
 
-import resource
+import rich
+import requests
+from requests.structures import CaseInsensitiveDict
+
 from preserve_podcasts.utils.file import audio_duration, md5file, sha1file
 from preserve_podcasts.utils.program_lock import ProgramLock
-
 from preserve_podcasts.utils.response import get_content_disposition, get_content_length, get_content_type, get_etag, get_last_modified, float_last_modified, get_suggested_filename
 from preserve_podcasts.utils.type_check import runtimeTypeCheck
-from preserve_podcasts.utils.util import safe_chars, sha1
+from preserve_podcasts.utils.util import podcast_guid_uuid5, safe_chars, sha1
 
-# Limit memory usage
-resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 512, 1024 * 1024 * 1024))
-# print(resource.getrlimit(resource.RLIMIT_AS))
+logger = logging.getLogger(__name__)
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 import os
 import time
 import json
@@ -25,7 +25,7 @@ import feedparser
 from charset_normalizer import from_bytes
 
 from .podcast import Podcast
-from .pod_sessiosn import createSession
+from .pod_sessiosn import PRESERVE_THOSE_POD_UA, create_session
 from .exception import FeedTooLargeError
 
 
@@ -37,27 +37,30 @@ if USE_RICH_PRINT:
     from rich import print
 else:
     rich.print = builtins.print
+    print = builtins.print
+
+assert print
 
 # Limit Feed size to 20 MiB
-FEED_SIZE_LIMIT = 1024 * 1024 * 20 # 20 MiB
-MAX_EPISODE_AUDIO_SIZE = 1024 * 1024 * 512 # 512 MiB
+FEED_SIZE_LIMIT = 1024 * 1024 * 40 # 40 MiB
+MAX_EPISODE_AUDIO_SIZE = 1024 * 1024 * 778 # 778 MiB
 
 # Maximum tolerable file size overestimation rate
 MAX_EPISODE_AUDIO_SIZE_TOLERANCE = 3
 
 
-DATA_DIR = 'data/'
+DATA_DIR = Path('data/')
 PODCAST_INDEX_DIR = 'podcasts_index/'
 PODCAST_AUDIO_DIR = 'podcasts_audio/'
 PODCAST_JSON_PREFIX = 'podcast_'
-PODCAST_FEED_URL_CACHE = 'feed_url_cache.json'
-__DEMO__PODCAST_JSON_FILE = DATA_DIR + PODCAST_INDEX_DIR + PODCAST_JSON_PREFIX + '114514_abcdedfdsf.json'
-__DEMO__PODCAST_AUDIO_FILE = DATA_DIR + PODCAST_AUDIO_DIR + '114514/guid_sha1_aabbcc/ep123.mp3'
+PODCAST_ID_CACHE = 'feed_id_cache.txt'
+__DEMO__PODCAST_JSON_FILE = DATA_DIR / PODCAST_INDEX_DIR / PODCAST_JSON_PREFIX / '114514_abcdedfdsf.json'
+__DEMO__PODCAST_AUDIO_FILE = DATA_DIR / PODCAST_AUDIO_DIR / '114514/guid_sha1_aabbcc/ep123.mp3'
 LOCK_FILE = 'preserve_podcasts.lock'
 
  # title mark
-TITLE_MARK_PREFIX = '=TITLE=='
-TITLE_MARK_SUFFIX = '.mark'
+TITLE_MARK_PREFIX = '_=TITLE=='
+MARKS_SUFFIX = '.mark'
 
 EPISODE_DOWNLOAD_CHUNK_SIZE = 1024 * 337 # bytes
 
@@ -118,19 +121,20 @@ def get_feed(session: requests.Session, url: str) -> Optional[bytes]:
 
 
 @runtimeTypeCheck()
-def download_episode(session: requests.Session, url: str, guid: str, episode_dir: str, filename: str,
+def download_episode(session: requests.Session, url: str, *, guid: str, episode_dir: Path, filename: str,
                     possible_size: int=-1, title: str= '',
                     force_redownload: bool = False):
     to_download = True
     possible_sizes = [possible_size]
 
-    ep_file_path = os.path.join(episode_dir, filename)
-    if os.path.exists(ep_file_path+'.metadata.json'):
-        with open(ep_file_path+'.metadata.json', 'r') as f:
+    ep_audio_file_path = episode_dir / filename
+    ep_audio_meta_path = episode_dir / (filename + '.metadata.json')
+    if ep_audio_meta_path.exists():
+        with open(ep_audio_meta_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
             possible_sizes.append(metadata['http-content-length']) if 'http-content-length' in metadata else None
 
-    if os.path.exists(ep_file_path) and os.path.getsize(ep_file_path) in possible_sizes:
+    if os.path.exists(ep_audio_file_path) and os.path.getsize(ep_audio_file_path) in possible_sizes:
         print('File already exists')
         to_download = False
         return
@@ -150,20 +154,20 @@ def download_episode(session: requests.Session, url: str, guid: str, episode_dir
         etag = get_etag(r)
         last_modified = get_last_modified(r)
 
-        content_disposition = get_content_disposition(r)
+        # content_disposition = get_content_disposition(r)
         suggested_filename = get_suggested_filename(r)
 
         print(f'content-length: {content_length}, etag: [green]{etag}[/green], last-modified: [yellow]{last_modified}[/yellow], suggested_filename: [blue]{suggested_filename}[/blue]')
         if content_length > 0 and content_length != possible_size:
-            if os.path.exists(ep_file_path) and os.path.getsize(ep_file_path) == content_length:
+            if os.path.exists(ep_audio_file_path) and os.path.getsize(ep_audio_file_path) == content_length:
                 print('File already exists')
                 possible_sizes.append(content_length) if content_length > 0 and content_length not in possible_sizes else None
                 to_download = False
 
         real_size = 0
         if to_download or force_redownload:
-            os.makedirs(os.path.dirname(ep_file_path), exist_ok=True)
-            with open(ep_file_path, 'wb') as f:
+            os.makedirs(os.path.dirname(ep_audio_file_path), exist_ok=True)
+            with open(ep_audio_file_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=EPISODE_DOWNLOAD_CHUNK_SIZE):
                     real_size += len(chunk)
                     checkEpisodeAudioSize(real_size, [possible_size, content_length])
@@ -172,56 +176,58 @@ def download_episode(session: requests.Session, url: str, guid: str, episode_dir
 
             # create title mark file
             safe_title = safe_chars(title)
-            if safe_title and not os.path.exists(os.path.join(episode_dir, TITLE_MARK_PREFIX+safe_title+TITLE_MARK_SUFFIX)):
-                with open(os.path.join(episode_dir, TITLE_MARK_PREFIX+safe_title+TITLE_MARK_SUFFIX),
+            if safe_title and not os.path.exists(os.path.join(episode_dir, TITLE_MARK_PREFIX+safe_title+MARKS_SUFFIX)):
+                with open(os.path.join(episode_dir, TITLE_MARK_PREFIX+safe_title+MARKS_SUFFIX),
                           'w', encoding='utf-8') as f:
                     if type(title) == str and title:
                         f.write(title)
                     else:
                         f.write('')
+            
+            time.sleep(3)
 
-            print('\nAudio duration:', audio_duration(ep_file_path))
+            print('\nAudio duration:', audio_duration(ep_audio_file_path))
 
             save_audio_file_metadata(
-                audio_path=ep_file_path, metadata_path=ep_file_path + '.metadata.json', r=r,
+                audio_path=ep_audio_file_path, metadata_path=ep_audio_meta_path, r=r,
                 renew=True)
 
         # modify file modification time
         if last_modified:
-            atime = os.path.getatime(ep_file_path) # keep access time
+            atime = os.path.getatime(ep_audio_file_path) # keep access time
             mtime = float_last_modified(last_modified)
             if mtime:
-                os.utime(ep_file_path, (atime, mtime)) # modify file update time
+                os.utime(ep_audio_file_path, (atime, mtime)) # modify file update time
             else:
                 print('mtime error:', mtime)
 
 
 def save_entry(entry:dict, file_path:str):
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(entry, indent=4, ensure_ascii=False))
 
 
 @runtimeTypeCheck()
-def save_podcast_index_json(podcast: Podcast, podcast_json_file_path: Optional[str]=None):
+def save_podcast_index_json(podcast: Podcast, podcast_json_file_path: Optional[Path] = None):
     if podcast.get('id') is None:
         raise ValueError('No id')
 
     if podcast_json_file_path is None:
-        podcast_json_file_path = os.path.join(DATA_DIR, PODCAST_INDEX_DIR, PODCAST_JSON_PREFIX + str(podcast['id']) + '_' + podcast['title'][:30] + '.json')
-        os.makedirs(os.path.dirname(podcast_json_file_path), exist_ok=True)
+        podcast_json_file_path = DATA_DIR / PODCAST_INDEX_DIR / f'{PODCAST_JSON_PREFIX}{podcast.id}_{podcast.title[:30]}.json'
+        logger.debug(f'new podcast_json_file_path: {podcast_json_file_path}')
 
-    with open(podcast_json_file_path, 'w') as f:
+    with open(podcast_json_file_path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(podcast.to_dict(), indent=4, ensure_ascii=False))
 
 def save_audio_file_metadata(
-        audio_path: str, metadata_path: str, r: requests.Response,
+        audio_path: Path, metadata_path: Path, r: requests.Response,
         renew: bool = False
         ):
     ''' renew: re calculate sha1, md5 '''
     content_length = get_content_length(r)
 
     if not renew and os.path.exists(metadata_path):
-        with open(metadata_path, 'r') as f:
+        with open(metadata_path, 'r', encoding='utf-8') as f:
             old_metadata = json.load(f)
     else:
         old_metadata = {}
@@ -231,8 +237,9 @@ def save_audio_file_metadata(
 
         # del 'Set-Cookie'
         _headers = dict(redirect.headers)
-        if 'Set-Cookie' in _headers:
-            del _headers['Set-Cookie']
+        for set_cookie in ['Set-Cookie', 'set-cookie']:
+            if set_cookie in _headers:
+                del _headers[set_cookie]
 
         url_history[int(i)] = {
             'status_code': redirect.status_code,
@@ -261,17 +268,31 @@ def save_audio_file_metadata(
         'md5': md5file(audio_path) if old_metadata.get('md5') is None else old_metadata.get('md5'),
         'url-history': url_history,
     }
-    with open(metadata_path, 'w') as f:
+    with open(metadata_path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(metadata, indent=4, ensure_ascii=False))
+
+
+def lowercase_headers(headers: CaseInsensitiveDict) -> Dict:
+    return {k.lower(): v for k, v in headers.items()}
 
 
 def do_archive(podcast: Podcast, session: requests.Session, delete_episodes_not_in_feed: bool = False):
     try:
-        d: feedparser.FeedParserDict = feedparser.parse(podcast['feed_url'])
+        r = session.get(podcast.feed_url, headers={'User-Agent': PRESERVE_THOSE_POD_UA})
+        
+        d: feedparser.FeedParserDict = feedparser.parse(r.content,
+            response_headers = lowercase_headers(r.headers), request_headers=r.request.headers,
+            agent = PRESERVE_THOSE_POD_UA,
+            sanitize_html = True,
+            resolve_relative_uris = True
+            )
+        # d: feedparser.FeedParserDict = feedparser.parse(podcast.feed_url)
+
         if d.get('bozo_exception', None) is not None:
-            print('bozo_exception:', d.bozo_exception)
             if len(d.feed) == 0:
                 raise d.bozo_exception # type: ignore
+            logger.warn(f'bozo_exception: {d.bozo_exception}')
+
         podcast.load(d.feed) # type: ignore @runtimeTypeCheck
     except Exception as e:
         podcast.update_failed()
@@ -279,13 +300,14 @@ def do_archive(podcast: Podcast, session: requests.Session, delete_episodes_not_
 
     if DEBUG_MODE:
         os.makedirs('debug', exist_ok=True)
-        with open(f'debug/{podcast["id"]}_{int(time.time())}.debug.json', 'w') as f:
+        with open(f'debug/{podcast.id}_{int(time.time())}.debug.json', 'w', encoding='utf-8') as f:
             f.write(json.dumps(d, indent=4, ensure_ascii=False))
 
-    podcast_audio_dir = os.path.join(DATA_DIR, PODCAST_AUDIO_DIR, str(podcast['id']))
+    podcast_audio_dir = DATA_DIR / PODCAST_AUDIO_DIR / podcast.id
 
     archive_entries(d=d, session=session, podcast_audio_dir=podcast_audio_dir,
                     delete_episodes_not_in_feed=delete_episodes_not_in_feed)
+
     podcast.update_success()
 
 
@@ -301,7 +323,7 @@ def url2audio_filename(url: str) -> str:
     return audio_filename
 
 
-def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, podcast_audio_dir: str,
+def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, podcast_audio_dir: Path,
                     delete_episodes_not_in_feed: bool = False):
     sha1ed_guids = set()
 
@@ -330,17 +352,24 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
         if type(guid) is not str or guid == '':
             raise ValueError('GUID must be str and not empty')
         print(f'Published: {entry.get("published")}', '\t' ,f'Updated: {entry.get("updated")}')
+        image_href: Optional[str] = entry.get('image', {}).get('href') # type: ignore
+        print(f'Image href: {image_href}')
 
         itunes_title = entry.get('itunes_title')
         itunes_duration = entry.get('itunes_duration')
         itunes_season = entry.get('itunes_season')
         itunes_episode = entry.get('itunes_episode')
         print(f'itunes_title: [yellow]{itunes_title}[/yellow]')
-        print(f'itunes_duration: {itunes_duration}', '\t' ,
-              f'itunes_season: {itunes_season}', '\t' ,
-              f'itunes_episode: {itunes_episode}')
-        itunes_explicit = entry.get('itunes_explicit') # NSFW
-        
+        print(
+            '\t'.join(
+                [
+                    f'itunes_duration: {itunes_duration}',
+                    f'itunes_season: {itunes_season}',
+                    f'itunes_episode: {itunes_episode}'
+                ]
+            )
+        )
+
         for link in entry.links:
             # The enclosure must have three attributes: url, length, and type.
             if not link.has_key('href') or not link.has_key('length') or not link.has_key('type'):
@@ -358,15 +387,17 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
             try:
                 length = int(length) # type: ignore
                 if length <= 0:
+                    logger.warn(f'link.length: {length} <= 0')
                     length = -1
             except ValueError:
+                logger.warn(f'Unable to int(length), length is "{length}"')
                 length = -1
-            print(length, "(",
-                    int(length/1024/1024), "MiB )") # type: ignore
+            print(length, "(", int(length/1024/1024), "MiB )") # type: ignore
 
             sha1ed_guid = sha1(guid.encode('utf-8'))
             sha1ed_guids.add(sha1ed_guid)
-            episode_dir = os.path.join(podcast_audio_dir, sha1ed_guid)
+
+            episode_dir = podcast_audio_dir / sha1ed_guid
 
             download_episode(session, link.href, possible_size=length, guid=guid, # type: ignore
                                 episode_dir=episode_dir,
@@ -379,83 +410,63 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
     if delete_episodes_not_in_feed:
         # delete episodes not in feed
         local_episode_dirs = set(os.listdir(podcast_audio_dir))
+
+        logger.debug(f'local_episode_dirs: {local_episode_dirs}')
+        logger.debug(f'sha1ed_guids: {sha1ed_guids}')
+
         episodes_not_in_feed_dirs = local_episode_dirs ^ sha1ed_guids
+
+        logger.debug(f'episodes_not_in_feed_dirs: {episodes_not_in_feed_dirs}')
+
         for dir in episodes_not_in_feed_dirs:
             print(f'[red]Episode not in feed, deleting {dir}[/red]')
             shutil.rmtree(os.path.join(podcast_audio_dir, dir))
 
-def feed_url_sha1(feed_url: str)-> str:
-    ''' return the sha1 of the feed url
+
+def all_podcast_id(use_cache: bool=False)-> set[str]:
+    ''' return a set of all feed url sha1.
 
     Note: URL ends with `/` will be `rstrip('/')` before hashing
     Note: `http://` URL will be treated as the same `https://` URL before hashing
     '''
-    parsed_url = urlparse(feed_url)
-    if parsed_url.scheme == 'http':
-        parsed_url = parsed_url._replace(scheme='https')
-    # print(f'feed_url_sha1: {feed_url} -> {parsed_url.geturl().rstrip("/")}')
-    return sha1(parsed_url.geturl().rstrip('/').encode('utf-8'))
-
-
-def all_feed_url_sha1(use_cache: bool=False)-> dict:
-    ''' return a set of all feed url sha1.  {feed_url_sha1<str>: podcast_id<int>}
-
-    Note: URL ends with `/` will be `rstrip('/')` before hashing
-    Note: `http://` URL will be treated as the same `https://` URL before hashing
-    '''
-    podcast_feed_url_cache = {}
     if use_cache:
-        with open(os.path.join(DATA_DIR, PODCAST_INDEX_DIR, PODCAST_FEED_URL_CACHE), 'r') as f:
-            podcast_feed_url_cache = json.load(f)
-            if type(podcast_feed_url_cache) != dict:
-                podcast_feed_url_cache = {}
-            print(f'all_feed_url_sha1 cache loaded: {len(podcast_feed_url_cache)}')
-            return podcast_feed_url_cache
+        with open(DATA_DIR / PODCAST_INDEX_DIR / PODCAST_ID_CACHE, 'r', encoding='utf-8') as f:
+            id_list = f.read().splitlines()
+            return set(id_list)
 
-    podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
+    podcast_id_set = set()
+    podcast_index_dirs = os.listdir(DATA_DIR / PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR / PODCAST_INDEX_DIR) else []
     for podcast_idnex_dir in podcast_index_dirs:
         if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
-            podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
-            podcast_json_file_path = os.path.join(DATA_DIR, PODCAST_INDEX_DIR, podcast_idnex_dir)
-            with open(podcast_json_file_path, 'r') as f:
+            podcast_id = podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0]
+            podcast_json_file_path = DATA_DIR / PODCAST_INDEX_DIR / podcast_idnex_dir
+            with open(podcast_json_file_path, 'r', encoding='utf-8') as f:
                 podcast_json = json.load(f)
             feed_url: str = podcast_json['feed_url']
-            podcast_feed_url_cache.update({feed_url_sha1(feed_url): podcast_id})
-    with open(os.path.join(DATA_DIR, PODCAST_INDEX_DIR, PODCAST_FEED_URL_CACHE), 'w') as f:
+            assert podcast_guid_uuid5(feed_url) == podcast_id
+            podcast_id_set.add(podcast_id)
+    with open(DATA_DIR / PODCAST_INDEX_DIR / PODCAST_ID_CACHE, 'w', encoding='utf-8') as f:
         # separators=(',\n', ': '))
-        json.dump(podcast_feed_url_cache, f, indent=4, sort_keys=True)
-        
-        print(f'all_feed_url_sha1 cache refreshed/loaded: {len(podcast_feed_url_cache)}')
+        f.write('\n'.join(podcast_id_set))
+        print(f'all_feed_url_sha1 cache refreshed/loaded: {len(podcast_id_set)}')
 
-    return podcast_feed_url_cache
+    return podcast_id_set
 
 
 
 def add_podcast(session: requests.Session, feed_url: str):
     print(f'Adding podcast: {feed_url}')
-    if feed_url_sha1(feed_url) in all_feed_url_sha1():
-        raise ValueError(f'Podcast already exists (sha1: "{feed_url_sha1(feed_url)}")\n')
-    podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
+    if podcast_guid_uuid5(feed_url) in all_podcast_id():
+        raise ValueError(f'Podcast already exists (guid: "{podcast_guid_uuid5(feed_url)}")\n')
+    podcast_index_dirs = os.listdir(DATA_DIR / PODCAST_INDEX_DIR) if (DATA_DIR / PODCAST_INDEX_DIR).exists() else []
     unavailable_podcast_ids = set()
-
-    # get used podcast ids
-    for podcast_idnex_dir in podcast_index_dirs:
-        if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
-            podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
-            # "podcast_123_whatever.json" -> 123
-            unavailable_podcast_ids.add(podcast_id)
-    
-    # find an available podcast id
-    available_podcast_id = 1
-    while available_podcast_id in unavailable_podcast_ids:
-        available_podcast_id += 1
     
     this_podcast = Podcast()
-    this_podcast.create(init_id=available_podcast_id, init_feed_url=feed_url)
+    this_podcast.create(init_feed_url=feed_url)
     print(f'Podcast id: {this_podcast.get("id")}')
     do_archive(this_podcast, session=session, delete_episodes_not_in_feed=True)
     save_podcast_index_json(this_podcast)
-    all_feed_url_sha1()
+    all_podcast_id()
 
 
 def get_args():
@@ -463,21 +474,42 @@ def get_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('--debug', action='store_true')
     parser.add_argument('-a','--add', nargs='+', help='RSS feed URL(s)', default=[])
-    parser.add_argument('-u','--update', action='store_true', help='Update podcast')
-    parser.add_argument('--only', nargs='+', help='Only update these podcast ids', default=[])
+    parser.add_argument('-u','--update', action='store_true', help='Update podcasts')
+    parser.add_argument('--only', nargs='+', help='[dev] Only update these podcast ids', default=[])
 
     args = parser.parse_args()
     if args.update and args.add:
         parser.error('--update can not be used with RSS feed URL(s)')
-    
+    if args.only:
+        raise NotImplementedError('--only')
     return args
+
+def get_podcast_json_file_paths():
+    for podcast_json_file_path in (DATA_DIR / PODCAST_INDEX_DIR).glob(f'{PODCAST_JSON_PREFIX}*.json'):
+        yield podcast_json_file_path
+
+def update_all(session: requests.Session):
+    for podcast_json_file_path in get_podcast_json_file_paths():
+        this_podcast = Podcast()
+        this_podcast.load(podcast_json_file_path)
+        assert this_podcast.id
+
+        if this_podcast.enabled is False:
+            print(f'Podcast {this_podcast.id}: {this_podcast.title} is disabled')
+            continue
+        if (time.time() - this_podcast.saveweb['last_success_timestamp']) < REFRESH_INTERVAL:
+            print(f'Podcast {this_podcast.id}: {this_podcast.title} not need to update')
+            continue
+
+        print(f'Podcast {this_podcast.id}: {this_podcast.title} updating...')
+        do_archive(this_podcast, session=session)
+        save_podcast_index_json(this_podcast, podcast_json_file_path=Path(podcast_json_file_path))
 
 @ProgramLock(LOCK_FILE)
 def main():
-    session = createSession()
+    session = create_session()
     args = get_args()
-    print(args.add)
-    time.sleep(1)
+
     for feed_url in args.add:
         try:
             add_podcast(session, feed_url)
@@ -487,48 +519,9 @@ def main():
             else:
                 raise e
 
-    if not args.update:
-        return
+    if args.update:
+        update_all(session=session)
 
-    podcast_index_dirs = os.listdir(DATA_DIR + PODCAST_INDEX_DIR) if os.path.exists(DATA_DIR + PODCAST_INDEX_DIR) else []
-    podcast_ids = {}
-    all_feed_url_sha1()
-    for podcast_idnex_dir in podcast_index_dirs:
-        if podcast_idnex_dir.startswith(PODCAST_JSON_PREFIX):
-            # try:
-            podcast_id = int(podcast_idnex_dir[len(PODCAST_JSON_PREFIX):].split('_')[0])
-            # except ValueError:
-            #     raise ValueError(f'Cant parse podcast id from {podcast_idnex_dir}')
-
-            podcast_ids[podcast_id] = podcast_idnex_dir
-
-
-    if args.only:
-        podcast_ids = {int(podcast_id): podcast_ids[int(podcast_id)] for podcast_id in args.only}
-        print(f'Only update podcast ids: {args.only}')
-
-    for podcast_id in podcast_ids:
-        podcast_idnex_dir = podcast_ids[podcast_id]
-
-        podcast_json_file_path = os.path.join(DATA_DIR, PODCAST_INDEX_DIR, podcast_idnex_dir)
-        this_podcast = Podcast()
-        this_podcast.load(podcast_json_file_path)
-        if podcast_id != this_podcast['id']:
-            raise ValueError('Podcast id not match')
-        if this_podcast['id'] is None:
-            raise ValueError('Podcast id not set')
-        if (time.time() - this_podcast['saveweb']['last_success_timestamp']) < REFRESH_INTERVAL:
-            print(f'Podcast {this_podcast["id"]}: {this_podcast["title"]} not need to update')
-            continue
-        if this_podcast["enabled"] is False:
-            print(f'Podcast {this_podcast["id"]}: {this_podcast["title"]} is disabled')
-            continue
-        
-        print(f'Podcast {this_podcast["id"]}: {this_podcast["title"]} updating...')
-        do_archive(this_podcast, session=session)
-        save_podcast_index_json(this_podcast, podcast_json_file_path=podcast_json_file_path)
-    
-    all_feed_url_sha1()
 
 if __name__ == '__main__':
     main()

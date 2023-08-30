@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "preserve-podcasts"
-version = "0.0.0"
-description = "A"
+name = "PreserveThosePod"
+version = "1.0.0"
+description = "Preserve those podcasts!"
 authors = ["yzqzss <yzqzss@yandex.com>"]
 license = "WTFPL"
 readme = "README.md"
@@ -13,9 +13,11 @@ requests = "^2.28.2"
 rich = "^13.3.3"
 feedparser = "^6.0.10"
 pyrfc6266 = "^1.0.2"
+internetarchive = "^3.5.0"
 
 [tool.poetry.scripts]
-preserve_podcasts = "preserve_podcasts:main"
+podcastsPreserve = "preserve_podcasts:main"
+podcastsUpload = "preserve_podcasts.uploadPodcasts:main"
 
 
 

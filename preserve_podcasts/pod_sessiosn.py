@@ -1,11 +1,15 @@
 import queue
 import time
+
 import requests
-PODSUCKERPLUS_UA = 'PodSuckerPlus/0.0.0 (Dev)'
+
+from preserve_podcasts.version import PTP_VERSION
 
 
+PRESERVE_THOSE_POD_UA = f'PreserveThosePod/{PTP_VERSION}'
 
-def createSession():
+
+def create_session():
     session = requests.Session()
     try:
         from requests.adapters import HTTPAdapter
@@ -47,7 +51,7 @@ def createSession():
                     msg = 'req retry (%s)' % response.status
                 else:
                     msg = None
-                time.sleep(backoff)
+                time.sleep(backoff+5)
 
         __retries__ = CustomRetry(
             total=5, backoff_factor=1.5,
@@ -60,7 +64,7 @@ def createSession():
     except:
         pass
 
-    session.headers.update({'User-Agent': PODSUCKERPLUS_UA})
+    session.headers.update({'User-Agent': PRESERVE_THOSE_POD_UA})
     print('User-Agent:',session.headers.get('User-Agent'))
 
     return session
