@@ -49,7 +49,7 @@ MAX_EPISODE_AUDIO_SIZE = 1024 * 1024 * 778 # 778 MiB
 MAX_EPISODE_AUDIO_SIZE_TOLERANCE = 3
 
 
-DATA_DIR = Path('data/')
+DATA_DIR = Path('pod_data/')
 PODCAST_INDEX_DIR = 'podcasts_index/'
 PODCAST_AUDIO_DIR = 'podcasts_audio/'
 PODCAST_JSON_PREFIX = 'podcast_'

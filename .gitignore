@@ -1,10 +1,10 @@
-venv
-.venv
-.vscode
+venv/
+.venv/
+.vscode/
+py_venv/
 __pycache__
-py_venv
-data
-tmp
+pod_data/
+tmp/
 debug
-dist
+dist/
 preserve_podcasts.lock
