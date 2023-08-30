@@ -38,6 +38,10 @@ def audio_duration(file_path: Path):
     if not file_path.exists():
         raise FileNotFoundError(f'File not found: {file_path}')
 
+    rt_code = subprocess.check_call(['ffprobe', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if rt_code != 0:
+        raise FileNotFoundError('ffprobe not found')
+
     try:
         t = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file_path], stderr=subprocess.STDOUT)
         duration = int(t.decode('utf-8').strip("\n").split('.')[0])
