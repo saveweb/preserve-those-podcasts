@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "PreserveThosePod"
-version = "1.0.2"
+version = "1.0.3"
 description = "Preserve those podcasts!"
 authors = ["yzqzss <yzqzss@yandex.com>"]
 license = "WTFPL"
