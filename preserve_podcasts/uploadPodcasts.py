@@ -23,6 +23,7 @@ from preserve_podcasts.preservePodcasts import (
 )
 MARKS_PREFIX = "_"
 UPLOADED_MARK = "_uploaded.mark"
+SPAM_MARK = "_spam.mark"
 
 logger = logging.Logger(__name__)
 
@@ -44,6 +45,7 @@ class Args:
     collection: str
     dry_run: bool
     debug: bool
+    not_spam: bool = False
 
     def __post_init__(self):
         self.keys_file = Path(self.keys_file).expanduser().resolve()
@@ -58,6 +60,7 @@ def get_args():
                         choices=["opensource_audio", "test_collection"])
     parser.add_argument("--dry-run", action="store_true", help="Dry run")
     parser.add_argument("--debug", action="store_true", help="Debug")
+    parser.add_argument("--not-spam", action="store_true", help="Upload episodes marked as spam by IA previously")
     args = parser.parse_args()
 
     return Args(**vars(args))
@@ -83,6 +86,9 @@ def upload_podcast(podcast: Podcast, args: Args):
             continue
         if (ep_audio_dir / UPLOADED_MARK).exists():
             logger.debug(f'Already uploaded: {ep_audio_dir}')
+            continue
+        if (ep_audio_dir / SPAM_MARK).exists() and not args.not_spam:
+            logger.debug(f'Marked as spam by IA: {ep_audio_dir}, skipping')
             continue
         upload_episode(podcast, ep_audio_dir, args=args)
 
@@ -250,6 +256,8 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args):
             )
     except requests.exceptions.HTTPError as e:
         if "appears to be spam." in str(e):
+            with open(ep_audio_dir / SPAM_MARK, "w", encoding="utf-8") as f:
+                f.write(f"Spam")
             if args.debug:
                 raise e
             logger.error(f"Upload failed: appears to be spam: {e}")
