@@ -25,11 +25,6 @@ pip install PreserveThosePod
 
 ## Usage
 
-```bash
-podcastsPreserve
-podcastsUpload
-```
-
 ### Quickstart
 
 To archive a podcast, run:

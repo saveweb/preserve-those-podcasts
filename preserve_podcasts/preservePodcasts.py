@@ -15,7 +15,7 @@ from preserve_podcasts.utils.util import podcast_guid_uuid5, safe_chars, sha1
 
 logger = logging.getLogger(__name__)
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import os
 import time
 import json
@@ -423,7 +423,7 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
             shutil.rmtree(os.path.join(podcast_audio_dir, dir))
 
 
-def all_podcast_id(use_cache: bool=False)-> set[str]:
+def all_podcast_id(use_cache: bool=False)-> Set[str]:
     ''' return a set of all feed url sha1.
 
     Note: URL ends with `/` will be `rstrip('/')` before hashing

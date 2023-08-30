@@ -1,11 +1,12 @@
 [tool.poetry]
 name = "PreserveThosePod"
-version = "1.0.0"
+version = "1.0.1"
 description = "Preserve those podcasts!"
 authors = ["yzqzss <yzqzss@yandex.com>"]
 license = "WTFPL"
 readme = "README.md"
 packages = [{include = "preserve_podcasts/"}]
+respository = "https://github.com/saveweb/preserve-those-podcasts"
 
 [tool.poetry.dependencies]
 python = "^3.8"
