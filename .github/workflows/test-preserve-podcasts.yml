@@ -38,6 +38,7 @@ jobs:
     - name: run preserve_podcasts
       run: |
         python -m preserve_podcasts -h
+        python -m preserve_podcasts.uploadPodcasts -h
     # - name: Test with pytest
     #   run: |
     #     cd . && pytest && cd ../../
