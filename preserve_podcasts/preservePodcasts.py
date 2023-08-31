@@ -8,7 +8,7 @@ import requests
 from requests.structures import CaseInsensitiveDict
 
 from preserve_podcasts.utils.file import audio_duration, md5file, sha1file
-from preserve_podcasts.utils.program_lock import ProgramLock
+from preserve_podcasts.utils.fileLock import AlreadyRunningError, FileLock
 from preserve_podcasts.utils.response import get_content_disposition, get_content_length, get_content_type, get_etag, get_last_modified, float_last_modified, get_suggested_filename
 from preserve_podcasts.utils.type_check import runtimeTypeCheck
 from preserve_podcasts.utils.util import podcast_guid_uuid5, safe_chars, sha1
@@ -51,6 +51,7 @@ MAX_EPISODE_AUDIO_SIZE_TOLERANCE = 3
 
 DATA_DIR = Path('pod_data/')
 PODCAST_INDEX_DIR = 'podcasts_index/'
+PODCAST_LOCK_DIR = 'podcasts_lock/'
 PODCAST_AUDIO_DIR = 'podcasts_audio/'
 PODCAST_JSON_PREFIX = 'podcast_'
 PODCAST_ID_CACHE = 'feed_id_cache.txt'
@@ -458,13 +459,12 @@ def add_podcast(session: requests.Session, feed_url: str):
     print(f'Adding podcast: {feed_url}')
     if podcast_guid_uuid5(feed_url) in all_podcast_id():
         raise ValueError(f'Podcast already exists (guid: "{podcast_guid_uuid5(feed_url)}")\n')
-    podcast_index_dirs = os.listdir(DATA_DIR / PODCAST_INDEX_DIR) if (DATA_DIR / PODCAST_INDEX_DIR).exists() else []
-    unavailable_podcast_ids = set()
     
     this_podcast = Podcast()
     this_podcast.create(init_feed_url=feed_url)
-    print(f'Podcast id: {this_podcast.get("id")}')
-    do_archive(this_podcast, session=session, delete_episodes_not_in_feed=True)
+    print(f'Podcast id: {this_podcast.id}')
+    with FileLock(DATA_DIR / PODCAST_LOCK_DIR, this_podcast.id):
+        do_archive(this_podcast, session=session, delete_episodes_not_in_feed=True)
     save_podcast_index_json(this_podcast)
     all_podcast_id()
 
@@ -502,10 +502,15 @@ def update_all(session: requests.Session):
             continue
 
         print(f'Podcast {this_podcast.id}: {this_podcast.title} updating...')
-        do_archive(this_podcast, session=session)
+        try:
+            with FileLock(DATA_DIR / PODCAST_LOCK_DIR, this_podcast.id):
+                do_archive(this_podcast, session=session)
+        except AlreadyRunningError:
+            print("Another instance is archiving this podcast, skip.")
+            continue
         save_podcast_index_json(this_podcast, podcast_json_file_path=Path(podcast_json_file_path))
 
-@ProgramLock(LOCK_FILE)
+
 def main():
     session = create_session()
     args = get_args()

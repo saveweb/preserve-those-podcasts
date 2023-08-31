@@ -4,6 +4,7 @@ import time
 import requests
 
 from preserve_podcasts.version import PTP_VERSION
+from preserve_podcasts.utils.requests_patch import SessionMonkeyPatch
 
 
 PRESERVE_THOSE_POD_UA = f'PreserveThosePod/{PTP_VERSION}'
@@ -66,5 +67,8 @@ def create_session():
 
     session.headers.update({'User-Agent': PRESERVE_THOSE_POD_UA})
     print('User-Agent:',session.headers.get('User-Agent'))
+
+    session_patcher = SessionMonkeyPatch(session=session)
+    session_patcher.hijack()
 
     return session
