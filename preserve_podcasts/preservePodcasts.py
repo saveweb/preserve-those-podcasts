@@ -459,7 +459,7 @@ def add_podcast(session: requests.Session, feed_url: str):
     print(f'Adding podcast: {feed_url}')
     if podcast_guid_uuid5(feed_url) in all_podcast_id():
         raise ValueError(f'Podcast already exists (guid: "{podcast_guid_uuid5(feed_url)}")\n')
-    
+
     this_podcast = Podcast()
     this_podcast.create(init_feed_url=feed_url)
     print(f'Podcast id: {this_podcast.id}')
@@ -476,6 +476,7 @@ def get_args():
     parser.add_argument('-a','--add', nargs='+', help='RSS feed URL(s)', default=[])
     parser.add_argument('-u','--update', action='store_true', help='Update podcasts')
     parser.add_argument('--only', nargs='+', help='[dev] Only update these podcast ids', default=[])
+    parser.add_argument("--insecure", action='store_true', help="Disable SSL certificate verification")
 
     args = parser.parse_args()
     if args.update and args.add:
@@ -514,6 +515,15 @@ def update_all(session: requests.Session):
 def main():
     session = create_session()
     args = get_args()
+
+    (DATA_DIR / PODCAST_INDEX_DIR).mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / PODCAST_LOCK_DIR).mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / PODCAST_AUDIO_DIR).mkdir(parents=True, exist_ok=True)
+
+    if args.insecure:
+        session.verify = False
+        requests.packages.urllib3.disable_warnings() # type: ignore
+        logger.warning("SSL certificate verification disabled")
 
     for feed_url in args.add:
         try:
