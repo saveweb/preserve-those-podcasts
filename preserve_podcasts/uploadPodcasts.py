@@ -287,12 +287,12 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args, session: Ar
         "scanner": PRESERVE_THOSE_POD_UA,
     }
 
-    print(metadata_init)
 
     # with open(identifier + "_metadata.json", "w", encoding="utf-8") as f:
     #     json.dump(metadata_init, f, indent=4, ensure_ascii=False)
 
     if args.dry_run:
+        print(metadata_init)
         print(best_image_href(podcast, ep_metadata))
         print("Dry run, skipping upload")
         return
@@ -305,12 +305,18 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args, session: Ar
         item = get_item(identifier, archive_session=session)
 
         if item.exists:
+            if item.metadata.get("upload-state","") == "uploaded":
+                logger.info(f"Item {identifier} already exists, skipping")
+                mark_as_uploaded(ep_audio_dir, identifier)
+                return True
+
             pop_uploaded_files(filedict, item)
 
         print(f"Uploading {len(filedict)} files...")
 
         ia_keys = IAKeys(args.keys_file)
         try:
+            print(metadata_init)
             r = item.upload(files=filedict, metadata=metadata_init,
                     access_key=ia_keys.access,
                     secret_key=ia_keys.secret,
@@ -372,7 +378,12 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args, session: Ar
         r.raise_for_status()
         print(r.text)
         assert r.json()["success"] == True
-        
+    
+    mark_as_uploaded(ep_audio_dir, identifier)
+    return True
+
+
+def mark_as_uploaded(ep_audio_dir: Path, identifier: str):
     with open(ep_audio_dir / UPLOADED_MARK, "w", encoding="utf-8") as f:
         f.write(f"Uploaded to {identifier} at {datetime.datetime.now().isoformat()}")
 
@@ -383,8 +394,6 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args, session: Ar
 
     print(f"==> Uploaded {identifier} successfully!")
     print(f"==> https://archive.org/details/{identifier}")
-
-    return True
 
 def main():
     args = get_args()
