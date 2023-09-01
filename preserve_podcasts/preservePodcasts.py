@@ -331,7 +331,7 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
     for entry in d.entries:
         is_episode = False
         for link in entry.get('links', []):
-            if link.has_key('type') and 'audio' in link['type']:
+            if link.has_key('type') and ('audio' in link['type'] or 'video' in link['type']):
                 is_episode = True
                 break
 
