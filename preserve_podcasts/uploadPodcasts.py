@@ -53,6 +53,7 @@ class Args:
     debug: bool
     not_spam: bool = False
     no_wait: bool = False
+    insecure: bool = False
 
     def __post_init__(self):
         self.keys_file = Path(self.keys_file).expanduser().resolve()
@@ -69,6 +70,7 @@ def get_args():
     parser.add_argument("--debug", action="store_true", help="Debug")
     parser.add_argument("--not-spam", action="store_true", help="Re-upload episodes marked as spam by IA previously")
     parser.add_argument("--no-wait", action="store_true", help="Don't wait for item to be created") # upload full metadata initially
+    parser.add_argument("--insecure", action="store_true", help="Don't verify SSL certificate")
     args = parser.parse_args()
 
     return Args(**vars(args))
@@ -244,7 +246,7 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args, session: Ar
 
     published_parsed :List = ep_metadata['published_parsed']
     # [2022, 1, 29, 8, 4, 49, 5, 29, 0]
-    date =  datetime.datetime(*published_parsed[:6]).isoformat()
+    date =  datetime.datetime(*published_parsed[:6]).strftime("%Y-%m-%d %H:%M:%S")
 
     external_identifier = []
     # https://podcastindex.org/namespace/1.0#Guid
@@ -399,6 +401,11 @@ def main():
     args = get_args()
 
     session: ArchiveSession = get_session()
+    if args.insecure:
+        session.verify = False
+        requests.packages.urllib3.disable_warnings() # type: ignore
+        logger.warning("SSL certificate verification disabled")
+
     sess_patcher = SessionMonkeyPatch(session=session)
     sess_patcher.hijack()
 
