@@ -410,6 +410,10 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
 
     if delete_episodes_not_in_feed:
         # delete episodes not in feed
+
+        if not podcast_audio_dir.exists():
+            return
+
         local_episode_dirs = set(os.listdir(podcast_audio_dir))
 
         logger.debug(f'local_episode_dirs: {local_episode_dirs}')
