@@ -1,1 +1,1 @@
-PTP_VERSION = '1.0.6'
+PTP_VERSION = '1.0.7'
