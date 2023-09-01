@@ -17,7 +17,7 @@ from preserve_podcasts.pod_sessiosn import PRESERVE_THOSE_POD_UA
 from preserve_podcasts.utils.fileLock import AlreadyRunningError, FileLock
 from preserve_podcasts.utils.requests_patch import SessionMonkeyPatch
 
-from preserve_podcasts.utils.util import sha1
+from preserve_podcasts.utils.util import podcast_guid_uuid5, sha1
 from preserve_podcasts.podcast import Podcast
 from preserve_podcasts.preservePodcasts import get_podcast_json_file_paths
 from preserve_podcasts.preservePodcasts import (
@@ -54,6 +54,7 @@ class Args:
     not_spam: bool = False
     no_wait: bool = False
     insecure: bool = False
+    feed: Optional[str] = None
 
     def __post_init__(self):
         self.keys_file = Path(self.keys_file).expanduser().resolve()
@@ -71,6 +72,7 @@ def get_args():
     parser.add_argument("--not-spam", action="store_true", help="Re-upload episodes marked as spam by IA previously")
     parser.add_argument("--no-wait", action="store_true", help="Don't wait for item to be created") # upload full metadata initially
     parser.add_argument("--insecure", action="store_true", help="Don't verify SSL certificate")
+    parser.add_argument("--feed", help="Upload a specific podcast by uuid or feed_url")
     args = parser.parse_args()
 
     return Args(**vars(args))
@@ -423,7 +425,20 @@ def main():
         session.hooks['response'].append(print_request)
     else:
         logger.setLevel(logging.INFO)
+    
+    if args.feed:
+        if args.feed.startswith("http"):
+            _uuid = podcast_guid_uuid5(args.feed)
+        elif len(args.feed) == 36 and len(args.feed.split("-")) == 5:
+            _uuid = args.feed
+        else:
+            raise ValueError(f"Invalid uuid or feed_url: {args.feed}")
 
+        podcast = Podcast()
+        podcast.load(DATA_DIR / PODCAST_JSON_PREFIX / _uuid)
+        assert podcast.id
+        upload_podcast(podcast, args=args, session=session)
+        return
     
     upload_podcasts(args=args, session=session)
 
