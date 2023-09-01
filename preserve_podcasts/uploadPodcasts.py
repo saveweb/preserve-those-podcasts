@@ -435,7 +435,7 @@ def main():
             raise ValueError(f"Invalid uuid or feed_url: {args.feed}")
 
         podcast = Podcast()
-        podcast.load(DATA_DIR / PODCAST_JSON_PREFIX / _uuid)
+        podcast.load(DATA_DIR / PODCAST_INDEX_DIR / f"{PODCAST_JSON_PREFIX}{_uuid}.json")
         assert podcast.id
         upload_podcast(podcast, args=args, session=session)
         return
