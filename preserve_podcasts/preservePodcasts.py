@@ -375,7 +375,8 @@ def archive_entries(d: feedparser.FeedParserDict, session: requests.Session, pod
             # The enclosure must have three attributes: url, length, and type.
             if not link.has_key('href') or not link.has_key('length') or not link.has_key('type'):
                 continue
-            if 'audio' not in link.type: # only download audio
+            if 'audio' not in link.type and 'video' not in link.type:
+                logger.debug(f'link.type: {link.type} not audio')
                 continue
 
             print(link.href)
