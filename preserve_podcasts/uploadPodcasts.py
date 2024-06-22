@@ -271,10 +271,10 @@ def upload_episode(podcast: Podcast, ep_audio_dir: Path, args: Args, session: Ar
         "guid": ep_metadata['id'], # ep_guid, as same as LifePod-Beta
         # ep_sha1ed_guid == sha1(ep_metadata['id'])
         "guid_sha1": ep_sha1ed_guid, # so people won't get confused with the item identifier
-        "link": ep_metadata['link'],
+        "link": ep_metadata.get('link', ""),
         "date": date,
-        "creator": [podcast.title, ep_metadata['author']], # podcast.author may contain author's Email address, DO NOT USE
-
+        "creator": [podcast.title] 
+                + ([ep_metadata['author']] if 'author' in ep_metadata else []), # podcast.author may contain author's Email address, DO NOT USE
         "podcast_title": podcast.title,
         "podcast_feedurl": podcast.feed_url,
         "podcast_link": podcast.link,
